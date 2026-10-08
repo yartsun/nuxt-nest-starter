@@ -1,0 +1,94 @@
+# Full stack: docker compose up --build   (needs JWT_SECRET in .env, see README)
+# Infrastructure only for local development: docker compose up -d postgres redis meilisearch
+name: nuxt-nest-starter
+
+x-api-env: &api-env
+  NODE_ENV: production
+  DATABASE_URL: postgresql://starter:${POSTGRES_PASSWORD:-starter}@postgres:5432/starter
+  REDIS_URL: redis://redis:6379
+  MEILI_HOST: http://meilisearch:7700
+  MEILI_API_KEY: ${MEILI_MASTER_KEY:-dev-master-key-change-me}
+  JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env, see README}
+  WEB_URL: ${WEB_URL:-http://localhost:3000}
+  API_URL: ${API_URL:-http://localhost:3001}
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+  GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+  GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: starter
+      POSTGRES_USER: starter
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-starter}
+    ports: ['${POSTGRES_PORT:-5432}:5432']
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U starter -d starter']
+      interval: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports: ['${REDIS_PORT:-6379}:6379']
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 3s
+      retries: 20
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.13
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-dev-master-key-change-me}
+      MEILI_NO_ANALYTICS: 'true'
+    ports: ['${MEILI_PORT:-7700}:7700']
+    volumes: [meilidata:/meili_data]
+
+  # One-shot: apply migrations, seed demo data on an empty database.
+  migrate:
+    build: ./api
+    environment:
+      <<: *api-env
+      SEED_DEMO: ${SEED_DEMO:-true}
+    command: sh -c "npx prisma migrate deploy && if [ \"$${SEED_DEMO:-true}\" = true ]; then node dist/scripts.js seed; fi"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  api:
+    build: ./api
+    environment: *api-env
+    ports: ['${API_PORT:-3001}:3001']
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      meilisearch: { condition: service_started }
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3001/health']
+      interval: 5s
+      retries: 20
+
+  worker:
+    build: ./api
+    environment: *api-env
+    command: ['node', 'dist/worker.js']
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      meilisearch: { condition: service_started }
+
+  web:
+    build: ./web
+    environment:
+      NUXT_PUBLIC_API_BASE: ${API_URL:-http://localhost:3001}
+      NUXT_API_BASE_SERVER: http://api:3001
+    ports: ['${WEB_PORT:-3000}:3000']
+    depends_on:
+      api: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  redisdata:
+  meilidata:

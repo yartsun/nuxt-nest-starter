@@ -1,0 +1,9 @@
+{
+  "rootDir": "..",
+  "testRegex": "test/.*\\.e2e-spec\\.ts$",
+  "transform": { "^.+\\.ts$": "ts-jest" },
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "testEnvironment": "node",
+  "setupFiles": ["reflect-metadata", "<rootDir>/test/env.ts"],
+  "testTimeout": 30000
+}
